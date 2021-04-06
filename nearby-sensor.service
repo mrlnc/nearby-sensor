@@ -1,0 +1,11 @@
+[Unit]
+Description=Nearby sensor for Homekit
+
+[Service]
+Type=simple
+User=merlin
+WorkingDirectory=/home/merlin/go/src/cputemp
+ExecStart=/home/merlin/go/src/cputemp/hklight
+
+[Install]
+WantedBy=multi-user.target
