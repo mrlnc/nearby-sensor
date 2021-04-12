@@ -19,7 +19,7 @@ import (
 )
 
 // 0 no debug, 1 some debug, 2 all of it
-const debug = 1
+const debug = 0
 
 var apple_company_id = []byte{0x4c, 0x00}
 var ble_packets_types = map[byte]string{
@@ -68,8 +68,9 @@ func parse_ble_adv(data []byte) map[byte][]byte {
 }
 
 type Beacon struct {
-	time     time.Time
+	Time     time.Time
 	RSSI     int
+	Nearby   bool
 	Services []byte
 }
 
@@ -90,26 +91,45 @@ func advHandler(a ble.Advertisement) {
 
 	parsed_data := parse_ble_adv(a.ManufacturerData()[2:])
 	b.RSSI = a.RSSI()
+	b.Nearby = false
+	// we don't need the payload, just the TLV tag
 	for k, _ := range parsed_data {
 		b.Services = append(b.Services, k)
+		b.Nearby = (k == 0x10)
 	}
 	if debug == 2 {
 		fmt.Println(b)
 	}
-	b.time = time.Now()
+	b.Time = time.Now()
 	beacon_ch <- b
 }
 
 func main() {
 	hciDev := flag.String("dev", "hci0", "Bluetooth Device")
-	pinFlag := flag.String("pin", "32191123", "HomeKit 8-digit PIN for this accessory")
+	pinStr := flag.String("pin", "32191123", "HomeKit 8-digit PIN for this accessory")
 	thresholdStr := flag.String("threshold", "-50", "Filter beacons below this threshold, in dBm")
 	timeoutStr := flag.String("timeout", "5", "Switch-off delay, in seconds")
-	var threshold int64
-	var timeout int64
-	flag.Parse()
+	var threshold, timeout int64
+	var err error
 
-	// Bluetooth scanning
+	flag.Parse()
+	if _, err = strconv.ParseUint(*pinStr, 10, 0); err != nil {
+		fmt.Println("PIN must be a number")
+		return
+	}
+
+	if threshold, err = strconv.ParseInt(*thresholdStr, 10, 0); err != nil {
+		fmt.Println("Threshold must be a number")
+		return
+	}
+
+	if timeout, err = strconv.ParseInt(*timeoutStr, 10, 0); err != nil {
+		fmt.Println("Timeout must be a number")
+		return
+	}
+	timeout_d := time.Duration(timeout) * time.Second
+
+	// start Bluetooth scanning
 	d, err := dev.NewDevice(*hciDev)
 	if err != nil {
 		log.Fatalf("can't open device: %s", err)
@@ -117,16 +137,11 @@ func main() {
 	ble.SetDefaultDevice(d)
 	go ble.Scan(context.Background(), true, advHandler, nil)
 
-	if _, err := strconv.ParseUint(*pinFlag, 10, 0); err != nil {
-		fmt.Println("PIN must be a number")
-	}
-
-	if threshold, err = strconv.ParseInt(*thresholdStr, 10, 0); err != nil {
-		fmt.Println("Threshold must be a number")
-	}
-
-	if timeout, err = strconv.ParseInt(*timeoutStr, 10, 0); err != nil {
-		fmt.Println("Timeout must be a number")
+	if debug == 1 {
+		for {
+			b := <-beacon_ch
+			fmt.Println(b.RSSI)
+		}
 	}
 
 	info := accessory.Info{
@@ -138,24 +153,24 @@ func main() {
 	service := service.NewContactSensor()
 	acc.AddService(service.Service)
 	// start HomeKit accessory
-	t, err := hc.NewIPTransport(hc.Config{Pin: *pinFlag}, acc)
-	fmt.Println("PIN: ", *pinFlag)
+	t, err := hc.NewIPTransport(hc.Config{Pin: *pinStr}, acc)
 
 	// for "Window Sensors", contact detected == window closed, no contact == window open
 	const beaconFound = characteristic.ContactSensorStateContactNotDetected
 	const noBeaconFound = characteristic.ContactSensorStateContactDetected
 	service.ContactSensorState.SetValue(noBeaconFound)
-	timeout_d := time.Duration(timeout) * time.Second
 
 	go func(timeout time.Duration, threshold int64, debug int) {
-		// we need to avoid state changes and have some inertia / filter
-
 		for {
 			select {
 			case b := <-beacon_ch:
 				// beacon received
 				if debug == 2 {
 					fmt.Println(b)
+				}
+				// only consider 'nearby' advertisements
+				if !b.Nearby {
+					continue
 				}
 				if b.RSSI < int(threshold) {
 					if debug == 2 {
@@ -164,7 +179,7 @@ func main() {
 					continue
 				}
 				// only consider beacons from the last second or so
-				if b.time.Before(time.Now().Add(time.Duration(-2) * time.Second)) {
+				if b.Time.Before(time.Now().Add(time.Duration(-2) * time.Second)) {
 					fmt.Println("Skipping old beacon")
 					continue
 				}
