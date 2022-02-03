@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"strconv"
@@ -19,7 +18,7 @@ import (
 )
 
 // 0 no debug, 1 some debug, 2 all of it
-const debug = 0
+const debug = 2
 
 var apple_company_id = []byte{0x4c, 0x00}
 var ble_packets_types = map[byte]string{
@@ -54,7 +53,7 @@ func parse_ble_adv(data []byte) map[byte][]byte {
 		i += 1
 		val_len := uint(data[i])
 		i += 1
-		if i+val_len >= max_i {
+		if i+val_len-1 > max_i {
 			// we'd run out of bounds, probably this wasn't a TLV
 			break
 		}
@@ -76,31 +75,33 @@ type Beacon struct {
 
 func advHandler(a ble.Advertisement) {
 	b := Beacon{}
-	if debug == 2 {
-		fmt.Printf("Manufacturer Data: 0x%s\n", hex.EncodeToString(a.ManufacturerData()))
-		fmt.Printf("Services: %v\n", a.Services())
-		for i, s := range a.ServiceData() {
-			fmt.Printf("Service %v, UUID: 0x%v, Data: 0x%x\n", i, s.UUID, s.Data)
-		}
-	}
 
 	if len(a.ManufacturerData()) < 2 || !bytes.Equal(a.ManufacturerData()[0:2], apple_company_id) {
 		// not an Apple device
 		return
 	}
 
+	fmt.Println(a.ManufacturerData()[2:])
+
 	parsed_data := parse_ble_adv(a.ManufacturerData()[2:])
+
+	fmt.Println(parsed_data)
+
+	b.Time = time.Now()
 	b.RSSI = a.RSSI()
 	b.Nearby = false
 	// we don't need the payload, just the TLV tag
 	for k, _ := range parsed_data {
 		b.Services = append(b.Services, k)
 		b.Nearby = (k == 0x10)
+
+		print(k)
 	}
+
 	if debug == 2 {
 		fmt.Println(b)
 	}
-	b.Time = time.Now()
+
 	beacon_ch <- b
 }
 
@@ -137,15 +138,15 @@ func main() {
 	ble.SetDefaultDevice(d)
 	go ble.Scan(context.Background(), true, advHandler, nil)
 
-	if debug == 1 {
+	/* if debug == 1 {
 		for {
 			b := <-beacon_ch
 			fmt.Println(b.RSSI)
 		}
-	}
+	} */
 
 	info := accessory.Info{
-		Name:         "Nearby Sensor",
+		Name:         "NearbySensor",
 		Manufacturer: "Nearby Sensor",
 	}
 
@@ -186,9 +187,7 @@ func main() {
 				// beacon found
 				fmt.Println(b)
 				if service.ContactSensorState.GetValue() == noBeaconFound {
-					if debug == 1 || debug == 2 {
-						fmt.Println("Beacon found, switching sensor to 'BeaconFound'")
-					}
+					fmt.Println("Beacon found, switching sensor to 'BeaconFound'")
 					service.ContactSensorState.SetValue(beaconFound)
 				} else {
 					if debug == 1 || debug == 2 {
@@ -199,9 +198,7 @@ func main() {
 			default:
 				// only occurs if sleep is done and no beacon was received
 				if service.ContactSensorState.GetValue() != noBeaconFound {
-					if debug == 1 || debug == 2 {
-						fmt.Println("No Beacon found, switching sensor to 'noBeaconFound'")
-					}
+					fmt.Println("No Beacon found, switching sensor to 'noBeaconFound'")
 					service.ContactSensorState.SetValue(noBeaconFound)
 				}
 			}
