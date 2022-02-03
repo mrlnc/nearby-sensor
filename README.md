@@ -95,5 +95,6 @@ The project is build with:
 * `go-ble` by Currant Inc. (BSD 3-Clause "New" or "Revised" License, [see here](https://github.com/go-ble/ble/blob/master/LICENSE))
 * HomeControl/`hc` by Matthias Hochgatterer (Apache License 2.0, [see here](https://github.com/brutella/hc/blob/master/LICENSE))
 * idea from [hexway/BLEEE](https://github.com/hexway/apple_bleee). they go much further in device identification, have a look at [their paper](https://arxiv.org/pdf/1904.10600.pdf)
+* also take a look at this paper: [Disrupting Continuity of Apple’s Wireless Ecosystem Security](https://www.usenix.org/system/files/sec21-stute.pdf)
 
 Trademarks by Apple & Bluetooth, probably. This is of course no official HomeKit equipment. Don't expect it to work.
